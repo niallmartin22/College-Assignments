@@ -1,0 +1,231 @@
+---
+title: "Final Project Log"
+author: "niall martin"
+date: "5/12/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#House Prices Data
+library(sf)
+library(dplyr)
+
+
+## Subsetting for 2019
+directory <- getwd()
+London_B <- st_read("data_opens_3.geojson")
+View(London_B)
+
+
+
+
+## Renaming variable for merge
+London_B$pcds <- London_B$pcd2
+
+```
+
+
+```{r}
+# Conversion Codes
+
+conv <- read.csv("/Users/niallmartin22/Documents/DataSets/Conversion Codes.csv",stringsAsFactors = FALSE)
+head(conv)
+library(dplyr)
+conv2 <- select(conv, pcds, lsoa11cd, lsoa11nm)
+conv2$LSOA.Code <- conv2$lsoa11cd
+
+```
+
+Crime Dataset
+```{r}
+crime <- read.csv("/Users/niallmartin22/Documents/DataSets/HistoricCrime.csv",stringsAsFactors = FALSE)
+
+##subsetting crime to 2011 & subset columns
+crime$total <- rowSums(crime[41:52])
+crime <- crime %>% select(LSOA.Code,Borough,total)
+```
+
+
+## Merging Datasets
+```{r}
+total <- merge(crime,conv2,by="LSOA.Code")
+total2 <- merge(total,London_B, by="pcds")
+```
+
+Cleaning the dataset and subsetting 
+
+```{r}
+total2 <- total2[, colSums(is.na(total2)) == 0]
+
+total2 <- total2 %>% select(pcds,LSOA.Code,Borough,total,price,propertytype,oldnew,tfarea,numberrooms,Dist_OpenSpace,geometry)
+```
+
+
+Calculating total crime for individual crime &
+House price average per Borough 
+
+```{r}
+
+library(dplyr)
+## Average crime per borough 
+new_data <- total2 %>% group_by(Borough) %>%
+  mutate(avg_crime1=mean(total))
+
+##Average crime per borough 
+#new_data$avg_crime <- new_data %>% select(total)%>% group_by(Borough) %>%
+ # mutate(mean(total))
+
+new_data2 <- new_data %>% select(price,tfarea,numberrooms,Dist_OpenSpace,avg_crime1)
+
+new_data2[,c("Borough")] <- list(NULL)
+
+```
+
+```{r}
+##Checking the distribution of continuous variables
+library(ggplot2)
+##Price
+p <- ggplot(new_data, aes(x=price, y=price)) + 
+  geom_violin()+
+  coord_flip()
+p
+
+#Log
+p1 <- ggplot(new_data2, aes(x=log(price), log(price))) + 
+  geom_violin()+
+  coord_flip()
+p1
+
+#tfarea
+p2 <- ggplot(new_data, aes(x=tfarea, y=tfarea)) + 
+  geom_violin()+
+  coord_flip()
+p2
+
+#Log
+p3 <- ggplot(new_data2, aes(x=log(tfarea), y=log(tfarea))) + 
+  geom_violin()+
+  coord_flip()
+p3
+
+#Inputting Log Values
+new_data2$price<-log(new_data2$price)
+new_data2$price<-log(new_data2$tfarea)
+
+```
+
+Hedonic model 
+
+```{r}
+library(Hmisc)
+library(corrplot)
+library(caret)
+
+set.seed(1234)
+inTrain <- createDataPartition(new_data2$price, p = 0.5, list = FALSE)
+trainData <- new_data2[inTrain, ]
+testData <- new_data2[-inTrain, ]
+dim(trainData)
+
+trainData <- as.data.frame(lapply(trainData, as.numeric))
+testData <- as.data.frame(lapply(testData, as.numeric))
+
+trainMatrix <- rcorr(as.matrix(trainData))
+print(trainMatrix)
+
+flattenCorrMatrix <- function(cormat, pmat){
+  ut <- upper.tri(cormat)
+  data.frame(row = rownames(cormat)[row(cormat)[ut]],
+             column = rownames(cormat)[col(cormat)[ut]],
+             cor = (cormat)[ut],
+             p = (pmat)[ut])}
+flattentrainMatrix <- flattenCorrMatrix(trainMatrix$r, trainMatrix$P)
+print(flattentrainMatrix)
+
+
+```
+
+There is a positive correlation (0.7) between price and floor area. 
+
+There is a positive correlation (0.5) between price and number of rooms. 
+
+There is a negative correlation (-0.03) between price and distance to open area. 
+
+There is a positive correlation (0.2) between price and average crime. 
+
+```{r}
+corrplot(trainMatrix$r, type = "upper", order = "FPC", method = "color",
+         p.mat = trainMatrix$P, sig.level = 0.01, insig = "pch",
+         tl.cex = 0.8, tl.col = "black", tl.srt = 45)
+```
+
+```{r}
+# Building our Multiple Linear Regression Model
+modFit <- train(price ~ Dist_OpenSpace + tfarea +
+                  avg_crime1 + numberrooms, method = "lm", data = trainData)
+finMod <- modFit$finalModel
+print(modFit)
+```
+
+```{r}
+print(finMod)
+```
+
+Regression Diagnostic plots 
+
+```{r}
+par(mfrow = c(2,2))
+plot(finMod)
+```
+
+```{r}
+##Linearity
+plot(finMod, 1, pch = 19, cex = 0.5)
+```
+
+
+Normality of the Data 
+
+```{r}
+# Plotting the Normal Q-Q Plot
+plot(finMod, 2, pch = 19, cex = 0.5)
+```
+
+Homoscedasticity
+
+```{r}
+# Plotting the Scale-Location Plot
+plot(finMod, 3, pch = 19, cex = 0.5)
+
+```
+
+Outliers, High Leverage Points and Influential Values
+```{r}
+# Plotting the Residuals vs Leverage Plot
+par(mfrow = c(1,2))
+plot(finMod, 4, pch = 19, cex = 0.5)
+plot(finMod, 5, pch = 19, cex = 0.5)
+```
+
+Prediction with our Multiple Linear Regression Model
+```{r}
+# Prediction with our Multiple Linear Regression Model
+Prediction <- predict(modFit, testData)
+qplot(price, Prediction, colour = Dist_OpenSpace, data = testData)
+```
+
+```{r}
+qplot(price, Prediction, colour = numberrooms, data = testData)
+```
+
+```{r}
+qplot(price, Prediction, colour = avg_crime1, data = testData)
+
+```
+
