@@ -21,6 +21,7 @@ library(ggrepel)
 LabourMarketAreas package allows us to use the Coombes and bond algorithm which is neccessary to create the Travel to Work Visualisation. The package ggrepel will also help us with this visualisation. This will allow us to label the regions appropriately.
 
 ```{r}
+setwd('/Users/niallmartin22/Documents/DataSets')
 dub_trips<-read_csv('dublin_trips.csv')
 head(dub_trips)
 
