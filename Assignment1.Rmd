@@ -1,0 +1,110 @@
+---
+title: "Case Studies in Data Science Assignment 1"
+author: "niall martin"
+date: "4/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Firstly it is necessary to load in the appropriate packages to the R markdown file.
+
+```{r}
+library(tidyverse)
+library(sf)
+library(LabourMarketAreas)
+library(ggrepel)
+```
+
+LabourMarketAreas package allows us to use the Coombes and bond algorithm which is neccessary to create the Travel to Work Visualisation. The package ggrepel will also help us with this visualisation. This will allow us to label the regions appropriately.
+
+```{r}
+dub_trips<-read_csv('dublin_trips.csv')
+head(dub_trips)
+
+dub_eds <-st_read('dub_eds.geojson',quiet=TRUE)
+ggplot(dub_eds)+ geom_sf()
+
+names<-read_csv('lookup.csv')
+head(names)
+
+```
+
+Next we load the datasets that will allow us to start coding. The first dataset as named 'dub_trips' is a dataset containing the array of community lived as well as community work ID's for each person. The second dataset contains the polygon geometries for each community. The last dataset contains the names for each community. 
+
+```{r}
+
+cl <-findClusters(dub_trips,15000,0.4,80000,0.5,idcom_type='char')
+cl1<-findClusters(dub_trips,15000,0.4,90000,0.6,idcom_type='char')
+cl2<-findClusters(dub_trips,15000,0.4,70000,0.41,idcom_type='char')
+cl3<-findClusters(dub_trips,15000,0.4,100000,0.65,idcom_type='char')
+
+```
+
+Next we use the findCluster function that can be found in the LabourMarketAreas package. This function takes in various inputs. The first input is the dataset that the algorithm will search for clusters on. The next input is the minimum population so in this case I started with 15000 as the minimum. The next input is the minimum self containment level in this case I used 0.4. Then we put the target parameters in. So I chose 80000 as the target population and 0.5 as the target self containment level. This level was selected as it is the  appropriate level according to Dublin's Labour Market structure. I created 3 other objects containing alternate values that were previously selected. This will help me check the sensitivity of change and the optimal level.
+
+
+```{r}
+
+lc <-st_centroid(dub_eds)%>% st_coordinates()
+lc <-tibble(x=lc[,1],y=lc[,2])
+
+```
+
+The above code creates a dataset containing the centroid of each polygon so that the labels at placed at the centre of each polygon. These are then labeled x and y. 
+
+```{r}
+cl_sf <- dub_eds %>%
+  left_join( tibble(cl$lma$clusterList) %>%
+  mutate(cluster=dub_eds$community[cluster]))
+
+cl_sf1 <- dub_eds %>%
+  left_join( tibble(cl1$lma$clusterList) %>%
+  mutate(cluster=dub_eds$community[cluster]))
+
+cl_sf2 <- dub_eds %>%
+  left_join( tibble(cl2$lma$clusterList) %>%
+  mutate(cluster=dub_eds$community[cluster]))
+
+cl_sf3 <- dub_eds %>%
+  left_join( tibble(cl3$lma$clusterList) %>%
+  mutate(cluster=dub_eds$community[cluster]))
+```
+
+This next bit of code adds the clusters and the amount of residents to the community polgon dataset dub_eds. This is done through the function left_join. I do this for each variation of input. This creates four finished datasets so that I can start visualising the resulting clusters.
+
+```{r}
+
+ggplot(cl_sf)+
+  geom_sf(col='white', aes(fill=cluster))+
+  scale_fill_brewer(palette='Dark2')+
+  geom_label_repel(data=lc, mapping=aes(x=x,y=y, label=names$name),
+                   size=1.5)
+
+ggplot(cl_sf1)+
+  geom_sf(col='white', aes(fill=cluster))+
+  scale_fill_brewer(palette='Dark2')+
+  geom_label_repel(data=lc, mapping=aes(x=x,y=y, label=names$name),
+                   size=1.5)
+
+ggplot(cl_sf2)+
+  geom_sf(col='white', aes(fill=cluster))+
+  scale_fill_brewer(palette='Dark2')+
+  geom_label_repel(data=lc, mapping=aes(x=x,y=y, label=names$name),
+                   size=1.5)
+
+ggplot(cl_sf3)+
+  geom_sf(col='white', aes(fill=cluster))+
+  scale_fill_brewer(palette='Dark2')+
+  geom_label_repel(data=lc, mapping=aes(x=x,y=y, label=names$name),
+                   size=1.5)
+
+```
+
+Lastly, I visualize the results for each dataset. I do this using ggplot to plot the datasets created. Geom_sf adds the geometry stored in the sf object to the plot. Scale_fill_brewer adds creates a desired aesthetic. Geom_label_repel adds labels to the region using the lookup.csv file. The results show the different travel to work regions based on the alternative parameters I provided for each plot. We can see how the cluster sizes and the amount of clusters vary across each plot. In the first plot with a target population of 80,000 we see that we have 6 different clusters with some larger than the others but relatively even. The next cluster with a target population of 90,000 and a target self containment level of 0.6 shows that the clusters are reduced to 5 and the sizes are more disproportionate, for example north Dublin has a very large cluster. When reduced to a target population 0f 70,000 we get similar results to the first plot but the clusters are even more evenly proportioned. For the last plot I set a target of 100,000 and as we can probably guess there was less clusters. There was only 4 clusters. The optimal level for me is a target population of 70,000 because you get more well proportioned clusters indicating clearer travel to work areas. We see that if we set the target population too high the clusters become to big a disproportionate. But playing around with the target population amounts gives a good insight into which areas in dublin have large travel to work areas. For example we can see that north Dublin has the largest travel to work area once the target population is set high.
+
+
+
+
