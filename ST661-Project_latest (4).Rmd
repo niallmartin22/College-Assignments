@@ -1,0 +1,1089 @@
+---
+title: "ST661 - Project"
+author: "Meadhbh Healy, Gavin Keane, Niall Martin, Gavin Simpson"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    code_folding: hide  
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE, out.width="100%")
+```
+
+# Road Safety in Ireland - Exploratory Analysis {.tabset .tabset-fade .tabset-pills}
+
+## Synopsis 
+
+Part 1
+
+---
+
+Part 2
+
+---
+
+Part 3
+
+## Data Preparation {.tabset .tabset-fade .tabset-pills}
+
+This section lists the packages required for this script and illustrates the data cleaning and preview steps needed before analyzing the data in detail. 
+
+---
+
+### Packages Required 
+
+**Following packages used in this project:**
+
+* fmsb: Creates radar chart (spider-web plot)
+
+* ggrepel: Adds labels to plots
+
+* ggthemes: Custom ggplot themes
+
+* kableExtra: Cleaner approach to creating HTML tables
+
+* plotly: Creates interactive plots
+
+* pxR: Used to read in the .px data file
+
+* reshape: Pivots tables - turns row values into columns
+
+* shiny: build interactive web apps
+
+* tidyverse: Contains dplyr and ggplot2 packages for manipulating data frames and creating plots
+
+
+```{r, class.source = "fold-show"}
+library(DT)
+library(fmsb)   # install.packages("fmsb")
+library(ggrepel)   # devtools::install_github("slowkow/ggrepel")
+library(ggthemes)   # install.packages('ggthemes', dependencies = TRUE)
+library(kableExtra)   # install.packages("kableExtra")
+library(plotly) 
+library(pxR)   # install.packages("pxR")
+library(reshape)    # install.packages('reshape')
+library(shiny)   
+library(summarytools)   # install.packages('summarytools')
+library(tidyverse)
+```
+
+### Data Import 
+
+**To load the data in correctly, the ROA16.px file must be placed in the same directory as the Rmarkdown script.**
+
+The dataset contains 8736 rows and 6 columns. It contains data of casualties and injuries on Irish roads between the years 2005-2018. 
+
+The data can be found from the Central Statistics Office website [here](https://data.cso.ie/).
+
+
+```{r, class.source = "fold-show"}
+# load in the data from the link
+ROA16.data <- as.data.frame(read.px("ROA16.px"))
+
+# dimenstions of the data frame
+dim(ROA16.data)
+
+# colnames
+colnames(ROA16.data)
+```
+
+
+### Data Cleaning
+
+The dataset does not have any missing data or require any major cleaning. To make it easier when coding, we will make some of the values in the table shorter and also remove some spaces. In particular, the 'Statistic' and 'Road.Type.User' columns' values will be shortened, e.g. 'Killed Casualties (Number)' to 'Killed'.
+
+```{r, class.source = "fold-show"}
+# source
+source <- "Source: Central Statistics Office\nLast updated: 02/11/20"
+
+# shorten Statistic column with new values
+factor.Stat <- as.factor(ROA16.data$Statistic)
+levels(factor.Stat) <- c("Killed", "Injured", "Killed&Injured")
+ROA16.data$Statistic <- factor.Stat
+
+# rename Road.User.Type groups to shorten names
+factor.road.user <- as.factor(ROA16.data$Road.User.Type)
+levels(factor.road.user) <- c("All.Users", "Pedestrians", "Cyclists", "Motorbike", "All.Cars",
+                             "Drivers", "Passengers", "Other")
+ROA16.data$Road.User.Type <- factor.road.user
+```
+
+
+### Data Preview
+
+The 'summarytools' package contains a nice function of printing the summary of the table. From the table below we can see how the table is structured. The 'value' column contains the total injury/casualty number per year, statistic, road user type, sex and age group. 
+
+It is important to notice that there is repeated counts in the dataset. In the statistic column, the 'Killed&Injured' value equals the sum of the 'Killed' and 'Injured' values for the same group. Also, the road users and age columns both contain an "All" value that equals the sum of the rest of the remainder values. These have to be considered when creating plots in order to prevent plotting duplicate data.
+
+```{r, comment=NA, class.source = "fold-show"}
+# print summary of table
+dfSummary(ROA16.data)
+```
+
+The next table, produced by the DT package, allows the first 100 rows to be previewed.
+
+```{r, class.source = "fold-show"}
+# previes of dataset
+datatable(head(ROA16.data, 100))
+```
+
+### Shiny Plot
+
+Due to the large volume of data involved for this data, it can be easier to view the data in a plot. We have created an interactive Shiny plot that plots the total statistic over time. 
+
+The plot can produce the total number of casualties, injuries, and both of the statistics combined over a number of years, which can also be altered using the slider on the left hand side. 
+
+These values can then be split by group - sex, road user and age. Also, for the road users and age groups, the plot can be edited to hide specific members of these groups, again by using the interactive menu on the left-hand side under the 'Hide Groups' option.
+
+```{r}
+shinyApp(
+  
+ # Define UI for app that draws a plot ----
+  ui <- fluidPage(
+    
+    # App title ----
+    titlePanel("Casualties and Injuries on Irish Roads, 2015 - 2018"),
+    
+    # Sidebar layout with input and output definitions ----
+    sidebarLayout(
+      
+      # Sidebar panel for inputs ----
+      sidebarPanel(
+        
+        sliderInput("year", "Years", 2005, 2018, value = c(2005,2018),
+                    sep = ""),
+        
+        selectInput("statistic", "Statistic(Injured or Killed)",
+                    c("Killed", "Injured", "Killed & Injured")),
+        
+        uiOutput("choose_group"),
+        
+        uiOutput("choose_specific_groups")
+      ),
+      
+      # Main panel for displaying outputs ----
+      mainPanel(
+        
+        # Output: Histogram ----
+        plotOutput(outputId = "Plot")
+        
+      )
+    )
+  ),
+  
+  
+  # Define server logic required to draw a plot ----
+  server <- function(input, output) {
+    
+    groups <- c("None", "Sex", "Age Group", "Road User Type")
+    
+    # drop-down selection box for which group
+    output$choose_group <- renderUI({
+      selectInput("group", "Group:", groups)
+    })
+    
+    # select specific groups
+    output$choose_specific_groups <- renderUI({
+      
+      #If missing input, return to avoid error later in function
+      if(is.null(input$group)){
+        print(input$group)
+        return()
+      }  
+      
+      group <- input$group
+      
+      # do nothing if selected 'None' or 'Sex'
+      if(group == "None" | group == "Sex"){
+        chosen.groups <- c()
+        
+      ## add options for age group
+      } else if(group == "Age Group"){
+        ageGroups <- levels(unique(ROA16.data$Age.Group))
+        # don't want 'All ages' group
+        chosen.groups <- ageGroups[ageGroups != "All ages"]
+        
+      ## add option for road user types 
+      } else {
+        roadUsers <- levels(unique(ROA16.data$Road.User.Type))
+        # don't want 'All ages' group
+        chosen.groups <- roadUsers[roadUsers != "All.Users"]
+      }
+      
+      # Create the checkboxes and select them all by default
+      checkboxGroupInput("chosen_groups", "Hide Groups:", 
+                         choices  = chosen.groups,
+                         selected = chosen.groups)
+      
+    })
+    
+    
+    output$Plot <- renderPlot({
+      
+      #If missing input, return to avoid error later in function
+      if(is.null(input$group)){
+        return()
+      }  
+      
+      minyear <- input$year[1]
+      maxyear <- input$year[2]
+      statistic <- input$statistic
+      group <- input$group
+      specific_groups <- input$chosen_groups
+      
+      ## data frame
+      data <- ROA16.data
+      
+      ## rename input choice
+      statistic1 <- ifelse(statistic == "Killed & Injured",
+                           "Killed&Injured",
+                           statistic)
+      
+      group1 <- ifelse((group == "None" | group == "Sex"),
+                       group, ifelse(group == "Age Group",
+                                     "Age.Group", "Road.User.Type"))
+      
+      # remove factor from year column
+      data$Year <- as.numeric(as.character(data$Year))
+      
+      if(group1 == "None"){
+        
+        df <- filter(data, Road.User.Type == "All.Users", Age.Group == "All ages")
+        
+        plot <- df %>%
+          #filter(Statistic == statistic1, Year >= as.character(minyear), Year <= as.character(maxyear)) %>% 
+          filter(Statistic == statistic1, Year >= minyear, Year <= maxyear) %>% 
+          group_by_at("Year") %>%
+          summarise(value = sum(value)) %>%
+          
+          ggplot(mapping = aes(x = Year, y = value, group = 1, colour = "red")) +
+          geom_point() + 
+          geom_line(key_glyph = "timeseries") +
+          theme_stata()
+        
+      } else {
+        
+        df <- filter(data, Road.User.Type != "All.Users", Age.Group != "All ages")
+        
+        df <- df %>%
+          filter(Statistic == statistic1, Year >= minyear, Year <= maxyear) %>% 
+          group_by_at(c(group1, "Year")) %>%
+          summarise(value = sum(value))
+        
+        #rename column
+        colnames(df)[1] <- "group"
+        
+        # select from specific groups
+        if(group != "Sex"){
+          print("Specific Groups")
+          df <- df[df$group %in% specific_groups,]
+        }
+        
+        plot <- ggplot(data = df, mapping = aes(x = Year, y = value , colour = group)) +
+          geom_point() + geom_line(key_glyph = "timeseries") +
+          theme_stata() 
+      }
+      
+      plot +
+        #scale_x_discrete(labels = as.character(minyear:maxyear)) +
+        labs( # edit labels and titles
+          title = "Shiny Interactive Plot",
+          caption = source, colour = group, y = paste("Total Number - ", statistic))
+      
+    })
+    
+  },
+  
+  options = list(height = 850)
+)
+```
+
+## Exploratory Data Analysis {.tabset .tabset-fade .tabset-pills}
+
+For this section of the project, each member of the team decided to perform data analysis on a specific section of the dataset. The 4 different sections are split into separate tabs below. 
+
+Each section begins with a list of questions that each member hopes to discover the answer to during the analysis. Each section uses plots, tables and statistical tests to make key observations and ultimately uncover the outcome of these questions.
+
+---
+
+
+### Killed and Injured Casualties
+
+In this section of the analysis we will look at the type of road statistic and break down the results of road accidents into deaths and injuries. By exploring this variable of the data we hope to learn some insights about any changes in death and injury tolls per year and reasoning for this. We hope to answer the following questions:
+
+1. What affect did significant legislation have on the death and injury toll from road accidents on Irish roads each year and has it affected Ireland from reaching 2020 targets?
+
+2. what categories within the road type users, various age groups and the different genders have made significant progress over a ten year period in relation to deaths and injuries?
+
+
+---
+
+#### 1. Did new legislation have any affect in killed casualties and injuries on Irish roads 
+
+Initially to determine if new legislation had an impact on deaths and injuries on Irish roads,  we will visualize the total number of injuries and killed casualties in Ireland from 2005 up to 2018. This will highlight any significant increase or decrease. Additionally, we will visually see if Ireland are on track to meet their 2020 target set by the Irish government in 2013, and how their death toll per year compares to the EU average.
+
+```{r}
+ROA16.Casualties <- ROA16.data[ROA16.data$Road.User.Type=="All.Users" & ROA16.data$Age.Group=="All ages",]
+
+ROA16.Casualties1 <- ROA16.Casualties %>%group_by(Statistic, Year) %>%summarise(across(value, sum))
+
+ROA16.Casualties2 <- left_join(ROA16.Casualties1[ROA16.Casualties1$Statistic == "Killed",], 
+                               ROA16.Casualties1[ROA16.Casualties1$Statistic == "Injured",], 
+                               by = c("Year"))
+# rename columns
+names(ROA16.Casualties2)[c(3,5)] <- c("Casualties", "Injuries")
+# constant used to keep Injuries and Casualties on the same scale
+coeff <- 30
+event_years <- c("2006","2011","2014")
+
+target <- 124
+EU_Average <- (4.96*51)
+
+events <- data.frame(year = c("2006","2011","2014"),
+                     event = c(" RSA established\n Mandatory alcohol testing introduced", 
+                               " Alcohol content tolerance from\n 80mg to 50mg per 100ml"," N-plates introduced"))
+
+figures <- data.frame(value = c(EU_Average, target), info = c(paste(" EU Average: ", EU_Average),
+                                                       paste(" Ireland's Target Casualties (per year): ", target)))
+
+colours_event <- c("maroon","goldenrod4","seagreen4")
+colours_figures <- c("orangered3", "royalblue4")
+
+ggplot(data = ROA16.Casualties2, aes(x = Year)) +
+  
+  # create line for casualties
+  geom_line(aes(y = Casualties, colour = "Casualty", group = 1), lwd = 1.5) + geom_point(aes(y = Casualties), size = 3) +
+  # create line for injuries
+  geom_line(aes(y = Injuries / coeff, colour = "Injury", group = 1), lwd = 1.5) + geom_point(aes(y = Injuries / coeff), size = 3) +
+  
+  geom_vline(data = events, aes(xintercept = year), linetype="dotted", size = 1, colour = colours_event) +
+  geom_text(data = events, aes(x=year, y = c(80,350,60), label=event), size=3, angle=0, hjust=0, vjust=c(0,0,-1), colour=colours_event) +
+  
+  geom_hline(data = figures, aes(yintercept=value), size = 1, colour = colours_figures) +
+  geom_text(data = figures, aes(x=0, y=value,label=info), size = 3,  hjust=0, vjust = c(-1.5,-0.5),colour = colours_figures) +
+  
+  # add two axes names
+  scale_y_continuous(sec.axis = sec_axis(~.*coeff, name = "Injuries")) +
+  
+  labs(
+    subtitle = "Figure 1: Annual number of casualties and injuries in Ireland, 2005-2018",
+    caption = "Source: Central Statistics Office\nLast updated: 02/11/20",
+    colour = ""
+  ) +
+  theme_economist()
+```
+
+Key Points:
+
+* The plot highlights a significant decrease in killed casualties from 2005-2018 whereas injuries have slighltly increased. This possibly indicates that despite the fact there is a similiar amount of accidents occurring on Irish roads, they are not as deadly.
+
+* It is evident that the establishment of the RSA in 2006 and the introduction of mandatory alcohol testing led to a major decrease in road deaths instantaneously and proved to be a key driving factor to reducing the death toll on Irish roads to reach their 2020 target. There was a decrease in deaths for 6 consecutive years initially from 2006-2012.
+
+* It seems the introduction of N-plates in 2014 and  reduction in alcohol content tolerance in 2011 did not have as much of a major impact in reducing deaths and injuries as the initial establishment of the RSA and the introduction of mandatory alcohol testing in 2006.
+
+* Ireland are roughly on track to reach 2020 targets of 124 deaths on Irish roads despite being slightly behind in 2018 with 139. It is vital there is a further reduction in road deaths over the following two years in order to meet targets, as it is evident since 2012 Ireland has struggled to make a consistent reduction in dead casualty numbers.
+
+* Although Ireland are behind their 2020 target slightly which is possible to reach, they are significantly ahead of the EU average =, which is based on a calculation of average road deaths per million within a population. Since 2008 Ireland have been under this average and thankfully in 2018 were roughly 45% below this EU average which highlights Irelands significant progress since 2005.
+
+---
+
+#### 2. What are the clear trends within gender, road type use, and age categories in terms of road deaths across a ten year period from 2008-2018?
+
+It is evident from the first plot Ireland made significant progress from 2005-2008 in relation to killed casualties on Irish roads. This section will help identify which categories have been extremely influential to driving this figure down, and which categories must be targeted if Ireland are to reach their 2020 target. Additionally we will visually see if their is a substantial rise or decrease in injuries across this period for the various chosen categories. 
+
+
+```{r}
+ROA16.2008.2018 <- ROA16.data[ROA16.data$Year %in% c("2008","2018") & 
+                                ROA16.data$Statistic %in% c("Killed", "Injured") &
+                                !(ROA16.data$Road.User.Type %in% c("All.Users", "Other")) &
+                                !(ROA16.data$Age.Group %in% c("All ages", "Age unknown")),]
+
+column_name = "Group"
+# sex
+ROA16.Sex.08.18 <- ROA16.2008.2018 %>% 
+  group_by(Statistic, !!column_name := Sex, Year) %>% 
+  summarise(across(value, sum)) %>%
+  mutate(percent_diff = 100*(value - lag(value))/lag(value),
+         type = "Sex")
+
+# road type user
+ROA16.RTU.08.18 <- ROA16.2008.2018 %>% 
+  group_by(Statistic, !!column_name := Road.User.Type, Year) %>% 
+  summarise(across(value, sum)) %>%
+  mutate(percent_diff = 100*(value - lag(value))/lag(value),
+         type = "Road Type User")
+
+# age group
+ROA16.Age.08.18 <- ROA16.2008.2018 %>% 
+  group_by(Statistic, !!column_name := Age.Group, Year) %>% 
+  summarise(across(value, sum)) %>%
+  mutate(percent_diff = 100*(value - lag(value))/lag(value),
+         type = "Age")
+
+ROA16.08.18.percent_diff <- subset(rbind(ROA16.Sex.08.18, ROA16.RTU.08.18, ROA16.Age.08.18), Year == "2018")
+
+ROA16.08.18.percent_diff$Group <- factor(ROA16.08.18.percent_diff$Group)
+groups <- as.factor(ROA16.08.18.percent_diff$Group)
+levels(groups) <- c("Male","Female","Ped","Cy","MB","Car","Dr","Pas","0-5","6-9","10-14","15-17","18-20","21-24","25-34","35-44","45-54","55-64","65+")
+ROA16.08.18.percent_diff$Group <- groups
+```
+
+```{r, fig.height=5, fig.width = 6}
+ggplot(ROA16.08.18.percent_diff, mapping = aes(x = Group, y = percent_diff, fill = percent_diff > 0)) +
+  geom_bar(stat = 'identity',mapping = aes(colour = type), size = 1) +
+  ## colours for the the fill
+  scale_fill_manual(values = c("#56B4E9", "#E69F00")) +
+  coord_flip() +
+  facet_wrap( ~ Statistic, ncol = 2, scales = "free") +  # create plot for casualties and injuries
+  labs(   # edit labels and titles
+    subtitle = "Figure 2: Diverging Plot: % Change in Casualty numbers from 2008 - 2018",
+    caption = source, fill = "Above Average:", x = "", y = "Percentage Change(%)", colour = "") +
+  ## remove legend explaining the fill colours
+  guides(fill = FALSE) +
+  theme_economist() # pre-installed theme
+```
+Key Points:
+
+* There is a decrease in killed casualties across all different road type users, both genders and all age groups except 55-64 and 45-54. 
+
+* The 55-64 age group would be cause for concern with more than 50% increase in road deaths within this age group over ten years.
+
+* Their is evidently a decrease in injuries within the lower age groups from 0-34 and an increase in the older age groups from 35-65+. This is key information for the RSA when rolling out a new safety campaign. 
+
+* The significant outlier within the road type user category is cyclists. This possibly indicates an increase cyclists on Irish roads from 2008-2018.
+
+---
+
+
+
+
+### Male/Female Analysis
+
+In this section we examine how gender impacts on road accidents. To investigate this impact we devised a number of research questions and objectives that we wanted to explore. These questions and objectives are as follows:
+
+**1.** Are males or females involved in more accidents on the road? Is there a significant difference?
+
+**2.** Is there a relationship between Gender and Road Users with relation to Injuries and Deaths?
+
+**3.** Further investigation of the results of question 2. by doing a year by year analysis.
+
+---
+
+#### 1. Are males or females involved in more accidents on the road?
+```{r, fig.align='center', fig.width=12}
+
+b<-ROA16.data[ROA16.data$Age.Group == "All ages" & ROA16.data$Road.User.Type == "All.Users" & ROA16.data$Sex == "Male",]
+c<-ROA16.data[ROA16.data$Age.Group == "All ages" & ROA16.data$Road.User.Type == "All.Users" & ROA16.data$Sex == "Female",]
+
+d<-b[b$Statistic=="Killed",]
+dsum<-sum(d$value)
+e<-c[c$Statistic=="Killed",]
+esum<-sum(e$value)
+
+f<-b[b$Statistic=="Injured",]
+fsum<-sum(f$value)
+g<-c[c$Statistic=="Injured",]
+gsum<-sum(g$value)
+
+male_prop_deaths <- dsum/(dsum+esum)
+male_prop_injuries <- fsum/(fsum+gsum)
+male_prop_both <- (dsum+fsum)/(dsum+fsum+esum+gsum)
+
+h<-rbind(b,c)
+i<-melt(h)
+
+j<-i[i$Sex=="Male" & i$Statistic == "Killed",]
+malekill<-sum(j$value)
+k<-i[i$Sex=="Female" & i$Statistic == "Killed",]
+femalekill<-sum(k$value)
+
+l<-i[i$Sex=="Male" & i$Statistic == "Injured",]
+maleinj<-sum(l$value)
+m<-i[i$Sex=="Female" & i$Statistic == "Injured",]
+femaleinj<-sum(m$value)
+
+sex<-c("male","male","male","female","female","female")
+type<-c("Killed", "Injured", "Killed and Injured", "Killed", "Injured", "Killed and Injured")
+value<-c(malekill, maleinj, (malekill+maleinj), femalekill, femaleinj, (femalekill+femaleinj))
+
+df1<- data.frame(sex,type,value)
+
+df2<-mutate(df1, prop=c(male_prop_deaths, male_prop_injuries, male_prop_both, 1-male_prop_deaths, 1-male_prop_injuries, 1-male_prop_both))
+
+ggplot(df2, aes(x = "", y = prop, fill = sex)) + 
+  geom_bar(stat = "identity", width = 1, position = position_fill()) +
+  coord_polar(theta = "y") + 
+  coord_polar("y", start=0)+
+  facet_wrap( ~ type)+
+  labs(x="",y="",fill="Sex")+
+  theme_stata()+
+  scale_fill_manual(values =c(rgb(0.8,0.2,0.5,0.9),rgb(0.2,0.5,0.5,0.9)))
+
+```
+To address the first question we used data visualization methods to give an overview comparing males and females with relation to number of deaths, number of injuries and number of deaths and injuries. As we can see above the pie charts used give us a complete overview of male vs female in each category. From a visual perspective we can clear state that males are involved in the most road accidents with data we have. 
+
+#### Proportional Analysis is shown below: 
+
+ Gender     | Proportion of Deaths |  Proportion of Injuries        |  Proportion of both Injuries and Deaths
+----------- | -------------------- | ------------------------------ | ------------------------
+**Males**   |   0.73722            |    0.57432                     |   0.57892
+**Females** |   0.26278            |    0.42568                     |   0.42108
+
+#### Key Points
+
+* Males are involved in more road accidents than females.
+
+* Males have a significantly higher proportion in deaths as opposed to injuries.
+
+* The result indicate that males are overall more wreckless than females with relation to road accidents but further investigating is required.
+
+---
+
+#### 2. Is there a relationship between Gender and Road Users with relation to Injuries and Deaths?
+Having looked through the data, we decided that it might be interesting to examine the relationship between gender and road users with relation to Injuries and Deaths on the road. This will help use address research question 2. To do so we decided to use a chi-squared analysis. This will allow us to get an understanding to whether gender has an influence on the user type of a road user. The hypotheses are as follows:
+
+**H0** (null): There is no relationship between gender and road users with relation to road deaths and injuries
+
+**H1** (alternative) : There is a relationship between gender and road users with relation to road deaths and injuries
+
+
+```{r, out.width="100%"}
+library(kableExtra)
+##Preparing table for Chi-squared Analysis
+ROA16.gender <- cast(ROA16.data, Statistic + Year + Road.User.Type + Age.Group ~ Sex)
+
+carsum<-subset(ROA16.gender, ROA16.gender$Road.User.Type=='Drivers' & ROA16.gender$Age.Group == 'All ages' & Statistic == "Killed&Injured", select = c(Male, Female) )
+carsum1<-c(sum(carsum$Male), sum(carsum$Female))
+
+pedsum<-subset(ROA16.gender, ROA16.gender$Road.User.Type=='Pedestrians' & ROA16.gender$Age.Group == 'All ages' & Statistic == "Killed&Injured", select = c(Male, Female) )
+pedsum1<-c(sum(pedsum$Male), sum(pedsum$Female))
+
+cycsum<-subset(ROA16.gender, ROA16.gender$Road.User.Type=='Cyclists' & ROA16.gender$Age.Group == 'All ages' & Statistic == "Killed&Injured", select = c(Male, Female) )
+cycsum1<-c(sum(cycsum$Male), sum(cycsum$Female))
+
+mCycsum<-subset(ROA16.gender, ROA16.gender$Road.User.Type=='Motorbike' & ROA16.gender$Age.Group == 'All ages' & Statistic == "Killed&Injured", select = c(Male, Female) )
+mCycsum1<-c(sum(mCycsum$Male), sum(mCycsum$Female))
+
+carPsum<-subset(ROA16.gender, ROA16.gender$Road.User.Type=='Passengers' & ROA16.gender$Age.Group == 'All ages' & Statistic == "Killed&Injured", select = c(Male, Female) )
+carPsum1<-c(sum(carPsum$Male), sum(carPsum$Female))
+
+othersum<-subset(ROA16.gender, ROA16.gender$Road.User.Type=='Other' & ROA16.gender$Age.Group == 'All ages' & Statistic == "Killed&Injured", select = c(Male, Female) )
+othersum1<-c(sum(othersum$Male), sum(othersum$Female))
+
+##Creating table for chi-squared test
+rutable <- matrix(c(carsum1, carPsum1, pedsum1, cycsum1, mCycsum1, othersum1),ncol=2,byrow=TRUE)
+colnames(rutable) <- c("Male","Female")
+rownames(rutable) <- c("Car Drivers", "Car Passengers","Pedestrians","Pedal Cyclists", "Motor Cyclists", "Other Users")
+rutable <- as.table(rutable)
+rutable %>%
+    kbl() %>%
+    kable_styling(bootstrap_options = c("striped", "hover"))
+##Chi-squared test
+chisq.test(rutable)
+
+```
+
+#### Result Analysis
+
+* We can see from these results that the p value is << 0.05. 
+
+* This means we can reject the null hypothesis 
+
+* This states that there is a relationship between gender and road user.
+
+* We can further investigate which road users have the most significant relationship
+
+We will now look at a visual analysis of the road users comparing male vs female injuries and deaths. This help us determine which road users are the most unevenly dispersed which will result in the conclusion to which road user accidents are predominately Male/Female.
+
+```{r, out.width="100%"}
+##Spider Plot and Line Graph showing the proportional difference of deaths and injuries male vs female 
+library(viridis)
+library(patchwork)
+library(hrbrthemes)
+library(fmsb)
+library(colormap)
+
+set.seed(1)
+
+rutable2<-as.data.frame(matrix(c(24903,12667,8161,6226,5162,7847,22096,14788,6296,2026,464,1608), ncol = 6, byrow = TRUE))
+
+colnames(rutable2) <- c("Car Drivers", "Car Passengers" , "Pedestrians" , "Pedal Cyclists" , "Motor Cyclists", "Other Users" )                        
+rutable2 <-rbind(rep(25000,6) , rep(0,6) , rutable2)                        
+
+colors_border=c( rgb(0.2,0.5,0.5,0.9), rgb(0.8,0.2,0.5,0.9)  )
+colors_in=c( rgb(0.3,0.5,0.5,0.4), rgb(0.9,0.2,0.5,0.4)  )
+
+par(mar=c(0,0,0,0))
+radarchart( rutable2, axistype=1, 
+
+  #customizing the polygon of the Spider Plot
+  pcol= colors_border, pfcol= colors_in, plwd=4, plty=1 , 
+
+  #customizing the grid of the Spider Plot
+  cglcol="grey", cglty=1, axislabcol="black", caxislabels=seq(0,25000,6500), cglwd=1.2,
+
+  #custom labels
+  vlcex=0.8 
+  )
+
+# Creating a Legend for Male and Female
+legend(x=0.85, y=1, legend = c("Male", "Female"), bty = "n", pch=20 , col=colors_border , text.col = "black", cex=0.9, pt.cex=1.6)
+
+rutable2 %>% dplyr::slice(c(3,4)) %>% t() %>% as.data.frame() %>% dplyr::add_rownames() %>% arrange(V1) %>% mutate(rowname=factor(rowname, rowname)) %>%
+  ggplot( aes(x=rowname, y=V1)) +
+    geom_segment( aes(x=rowname ,xend=rowname, y=V2, yend=V1), color="black") +
+    geom_point(size=4, color=rgb(0.2,0.5,0.5,0.9)) +
+    geom_point(aes(y=V2), size=4, color= rgb(0.8,0.2,0.5,0.9), alpha=0.3) +
+    coord_flip() +
+    theme_stata() +
+    theme(
+      panel.grid.minor.y = element_blank(),
+      panel.grid.major.y = element_blank(),
+      axis.text = element_text( size=8 )
+    ) +
+    ylim(0,25000) +
+    ylab("Deaths and Injuries") +
+    xlab("Road User Type") 
+
+
+```
+
+#### Key points from graph
+
+* Largest proportional differences lie in the "Pedal Cyclist", "Motor Cyclists" and "Other Users" categories. 
+
+* The other categories are relatively evenly dispersed. 
+
+* These results for could indicate that more males use motor bikes, pedal bikes etc. than females do. 
+
+* The Other Users category has the largest difference with a difference of 6239.
+
+* One possible explanation for this could be that Tractors are predominately operated by males. 
+
+---
+
+#### 3. Further investigation of the results of question 2. by doing a year by year analysis.
+
+Having identifying the road users to further investigate we decided to do a year by year analysis of these users comparing males and females. The graph is displayed below. This will help us derive in insight into the how each of these categories are changing from year to year.
+
+```{r , fig.align='center', fig.width=12, fig.height=10}
+
+##Preparing data for year by year comparison of male vs female - Injured and  Killed
+d2<-subset(ROA16.data, Statistic == "Killed&Injured")
+d2<-d2[order(d2$Year),]
+
+d2<-subset(ROA16.data, Statistic == "Killed&Injured")
+d2<-d2[order(d2$Year),]
+d2<-subset(d2, (Road.User.Type == "Cyclists" | Road.User.Type == "Motorbike" | Road.User.Type == "Other") & Age.Group == "All ages")
+
+##Line graph comparing male vs female injuries and deaths year by year
+ggplot(d2, aes(x=Year, y=value, colour = Sex, group = Sex))+
+  geom_line()+
+    geom_point(colour = "black", fill = 1, size=1, shape =21)+
+  facet_wrap(Road.User.Type~Sex, ncol = 2)+  
+  theme_stata()+
+  scale_color_manual(values =c(rgb(0.2,0.5,0.5,0.9), rgb(0.8,0.2,0.5,0.9)))+
+  labs(title = "Pedal Cyclists, Motor Cyclists and Other Users 2005-2018 Analysis", y = "Value", x = "Year")  
+  
+```
+
+#### Key points from Graph
+
+* Pedal cyclists accidents have steadily increased over the years in both male and female.
+
+* The severity of this increase is much more severe in males
+
+* Other road users Injuries and Deaths has decreased in males but remained steady in females.
+
+* Male Pedal cyclists accidents have increased every year except one year - (2015-2016)
+
+
+
+
+
+
+
+
+### Age-Group Analysis
+
+```{r, include=FALSE}
+casualty.data<-ROA16.data
+```
+In this section, we analyze the Age-Group category. We hope to gain insight into high risk age groups on Irish roads, and explore reasons for this.We hope to answer the following:
+
+1. Which Age Groups represented in the data are the highest risk, and what defining attributes do they share?
+
+2. Are the least experienced/youngest Age Groups necessarily the highest risk? What is the ratio of male/female in these groups?
+
+3. What are the trends in Age Groups for ten years represented in the data?
+
+---
+
+#### 1. Which Age Groups represented in the data are the highest risk, and what defining attributes do they share?
+
+To take an initial overview at the highest risk Age Groups we will represent the data visually, categorized by Age Group, hereafter referred to as AG. This is done interactively in the bubble plot below. Each different coloured bubble represents a different AG, and the size of that bubble indicates the amount of people killed or injured in that AG, between the years of 2005-2018. By hovering over a bubble we can see some information regarding this statistic, including Year, Road Type User and Sex.You can isolate a single age group by double clicking on the legend below it.
+
+```{r include=FALSE}
+All.Road.Users<-subset(casualty.data, !(casualty.data$Statistic=="All Killed and Injured Casualties (Number)"))
+All.Road.Users<-All.Road.Users[!(All.Road.Users$Age.Group=="All ages" | All.Road.Users$Age.Group=="Age unknown" | All.Road.Users$Road.User.Type=="All road users" | All.Road.Users$Road.User.Type=="All Car users"),]
+
+All.Road.Users<-All.Road.Users[!(All.Road.Users$Year=="2005" | All.Road.Users$Year=="2006" |
+All.Road.Users$Year=="2007"),]
+
+```
+
+```{r fig.width=9.5, fig.height=6.5}
+p <- All.Road.Users %>%
+  mutate(Year=Year) %>%
+  mutate(Age.Group=Age.Group) %>%
+  mutate(value=value) %>%
+  mutate(Road.User.Type=Road.User.Type) %>%
+
+mutate(text = paste("Year: ", Year, "\nAge Group: ", Age.Group, "\nAmount: ", value, "\nRoad user: ", Road.User.Type, "\nStatistic: ", Statistic, "\nSex: ", Sex, sep="")) %>%
+ggplot(aes(x=value, y=Year, size = value, color = Age.Group,text=text))+
+    geom_point(alpha=0.5) +
+    scale_size(range = c(1, 23)) +
+    scale_color_manual(values = c( "#ff0066", "#00ff7f", "#cc0099",  "#8080ff", "#bf80ff", "#E7B800", "#cc0000","#5900b3", "#269900", "#00AFBB", "#ffff1a")) +theme_stata() +
+  ggtitle("Fig. 1 All serious accidents categorized by age group for types of road user")+
+  labs(x="Number", y="Year")+
+  theme(plot.margin=unit(c(-0.2,0.35,0,0), "cm"))
+  
+pp <- ggplotly(p, tooltip="text")%>%layout(legend = list(orientation = "h", x = 0.7, y = -0.12))
+pp
+```
+
+Key Points from this plot:
+
+* The results are extremely stark. 
+
+* It demonstrates to us clearly that the highest risk AG for accidents on our roads is the 25-34 AG, followed by the 35-44 AG.
+
+* More than half of these are car drivers. 
+
+* Thus we will separate the most high risk group of Road Users to analyze it further by Age Group.
+
+---
+
+#### 2. Are the least experienced Age Groups necessarily the highest risk? What is the ratio of male/female in these groups?
+
+The below plot is a circular bar plot representing car drivers for every Age Group.
+
+```{r, fig.align='center',fig.width=14, fig.height=8}
+
+drivers<-subset(casualty.data, (casualty.data$Road.User.Type=="Drivers" & casualty.data$Statistic=="Killed&Injured"))
+
+drivers<-drivers[!(drivers$Age.Group=="All ages" | drivers$Age.Group=="Age unknown"),]
+
+Road<-ggplot(data = drivers, mapping = aes(x= Age.Group, y= value, fill=Sex)) + geom_bar(stat="identity", position="dodge")+theme_stata()+
+  scale_fill_manual(values=c( "#E69F00", "#56B4E9"))
+Road<-Road+ggtitle("Fig. 2 Accidents by age group, January to December 31st 2005 to 2018")
+
+Road<-Road+scale_x_discrete(labels = function(x) str_wrap(x, width = 7))
+Road<-Road+labs(x="Age Group", y="Number")
+Road<-Road+ coord_polar()
+Road
+```
+
+Key Points from the plot:
+
+* Again we see the highest group is 25-34.
+
+* Men have a higher number of driver accidents in every AG, except for the 45-54.
+
+* The highest number of accidents are attributed to the 25-34 years old AG.
+
+* You need to be at least 17 years old to learn to legally drive in Ireland.
+
+* Thus the most inexperienced legal drivers are the 18-20 AG and the 21-24 AG.
+
+* We may combine these to see if the collective sum is higher than the highest AG.
+
+----
+
+#### Fig. 3 Table to show driver statistics for all Age Groups
+
+```{r}
+one<-c(drivers$value[drivers$Age.Group=="0 - 5 years"])
+two<-c(drivers$value[drivers$Age.Group=="6 - 9 years"])
+three<-c(drivers$value[drivers$Age.Group=="10 - 14 years"])
+four<-c(drivers$value[drivers$Age.Group=="15 - 17 years"])
+five<-c(drivers$value[drivers$Age.Group=="18 - 20 years"])
+six<-c(drivers$value[drivers$Age.Group=="21 - 24 years"])
+seven<-c(drivers$value[drivers$Age.Group=="25 - 34 years"])
+eight<-c(drivers$value[drivers$Age.Group=="35 - 44 years"])
+nine<-c(drivers$value[drivers$Age.Group=="45 - 54 years"])
+ten<-c(drivers$value[drivers$Age.Group=="55 - 64 years"])
+eleven<-c(drivers$value[drivers$Age.Group=="65 years and over"])
+
+DT<-data.frame(
+Age=c("0-5","6-9","10-14","15-17", "18-20", "21-24", "25-34","35-44", "45-54", "55-64", "65+"),
+Means=c(mean(one), mean(two), mean(three), mean(four), mean(five), mean(six), mean(seven), mean(eight), mean(nine), mean(ten), mean(eleven)),
+Medians=c(median(one), median(two), median(three), median(four), median(five), median(six), median(seven), median(eight), median(nine), median(ten), median(eleven)),
+Maxes=c(max(one), max(two), max(three), max(four), max(five), max(six), max(seven), max(eight), max(nine), max(ten), max(eleven)),
+StDev=c(sd(one), sd(two), sd(three), sd(four), sd(five), sd(six), sd(seven), sd(eight), sd(nine), sd(ten), sd(eleven))
+)
+DT %>%
+  kbl() %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+Key Points:
+
+* Sadly we see some outliers in the 0-5, 6-9 and 10-14 AG, meaning that there have been some driver casualties in these AGs in the years 2005-2018.
+
+* There seem to be some similarity in the mean sum of the 18-20 and 21-24 AG, and the 25-34 AG.
+
+* We will isolate these two groups and plot them to gauge equality.
+
+```{r fig.align='center',fig.width=14, fig.height=8}
+aggData <-aggregate(drivers$value, by=list(drivers$Year, drivers$Age.Group), FUN=sum, na.rm=TRUE)
+
+x<-c(aggData$x[aggData$Group.2=="18 - 20 years"] +aggData$x[aggData$Group.2=="21 - 24 years"])
+Group.2<-c(rep("18 - 24 years",14))
+Group.1<-c(2005:2018)
+combi<-data.frame(cbind(Group.1, Group.2, x))
+combi$Group.1 = as.factor(combi$Group.1)
+combi$Group.2 = as.factor(combi$Group.2)
+combi$x = as.double(combi$x)
+high<-aggData[aggData$Group.2=="25 - 34 years",]
+aggData1<-rbind(high, combi)
+
+names(aggData1)[names(aggData1) == "Group.2"] <- "Age.Group"
+
+data_summary <- function(x) {
+   m <- mean(x)
+   ymin <- m-sd(x)
+   ymax <- m+sd(x)
+   return(c(y=m,ymin=ymin,ymax=ymax))
+}
+
+ggplot(aggData1, aes(x=Age.Group, y=x, fill=Age.Group)) + geom_violin()+theme_stata()+
+  scale_fill_manual(values = c("#cc0000", "#093161"))+
+ggtitle("Fig. 4 Distribution of serious accidents for 18-24 age group and 25-34 age group")+
+  labs(x="Age Group", y="Number")+
+stat_summary(fun.data=data_summary)
+```
+
+Key Points:
+
+* According to the above violin plot, the distribution of each age group per year is not equal. 
+
+* It appears as if the volume of accidents for the 25-34 age group is still higher, but the kernel density has some overlap.
+
+* The black dot represents the mean which looks quite close.
+
+---
+
+#### Hypothesis Test
+
+Let us conduct a Hypothesis Test to discover whether the median of both AGs are equal or if there is significant difference between the two.
+
+As the distribution of accidents per age group is not normal, it does not meet the requirements for a t-test. 
+
+For Wilcoxon Test the statistical hypotheses are:
+H0:All populations medians are equal
+H1:At least two of them differ
+
+```{r}
+merge<-c(combi$x)
+higher<-c(high$x)
+wilcox.test(higher,merge)
+```
+
+* The p-value is less than the significance level of 0.05.
+
+* We reject the null hypothesis.
+
+* We can conclude that the medians of the combined 18-24 age group and the 25-34 age group are significantly different.
+
+* Thus the highest risk driver AG is not the least experienced driver AG.
+
+----
+
+#### 3. What are the trends in Age Groups for ten years represented in the data?
+
+The 10 years which this data encompasses (2008-2018), a massive amount of change has been wrought.The RSA has run extensive road safety campaigns, and changes to public transport infrastructure and road building have occurred.
+
+We ask if any of this can be borne out in the data, represented in a time series graph below.
+
+```{r, fig.align='center', fig.width=14, fig.height=8}
+
+aggData2 <-aggregate(casualty.data$value, by=list(casualty.data$Year, casualty.data$Age.Group), FUN=sum, na.rm=TRUE)
+
+aggData2<-aggData2[!(aggData2$Group.1=="2005" | aggData2$Group.1=="2006" |
+aggData2$Group.1=="2007"),]
+
+names(aggData2)[names(aggData2) == "Group.1"] <- "Year"
+names(aggData2)[names(aggData2) == "Group.2"] <- "Age.Group"
+names(aggData2)[names(aggData2) == "x"] <- "Count"
+
+aggData2<-aggData2[!(aggData2$Age.Group=="All ages"),]
+
+ggplot(aggData2, aes(Year, Count, group=Age.Group, color=Age.Group)) + 
+  geom_point(size=2) + geom_line(size=1) +
+  scale_color_manual(values = c("#006600","#cc0000", "#cc0099",  "#8080ff", "#bf80ff", "#E7B800", "#ff0066","#5900b3", "#269900", "#00AFBB", "#ffff1a","#00FF00"))+
+  theme_stata()+
+  ggtitle("Fig. 5 Incidence of accidents per age group for 10 years 2008-2018")+
+  scale_fill_discrete(name="Age Groups")
+```
+
+Key points:
+
+* The overall trend of serious accidents has decreased from 2008 to 2018. 
+
+* The three highest risk age groups 18-20, 21-24 and 25-34 have lowered significantly. Age unknown is the group with the highest recorded decrease.
+
+* However, the four oldest age groups 35-44, 45-54, 55-64 and 65 and over have all increased. 
+
+
+
+---
+
+
+
+
+
+
+
+
+### Road Type User (RTU)
+
+In this section of the analysis we will look at the road type user variable. By exploring this variable of the data we hope to learn some insights about different road users on Irish roads and hope to answer the following questions:
+
+1. For which RTU groups are the number of accidents per year increasing/decreasing?
+2. Which RTU is involved in most accidents? Is the most involved road user the same for both male and female?
+3. Which RTU has the largest and lowest ratio of casualties to injuries?
+
+---
+
+#### 1. For which RTU groups are the number of accidents per year increasing/decreasing?
+
+To take an initial look of the comparisons between the different road users, we will visualize the total number of injuries and casualties in separate plots for each group. This will show us which road users are involved in the most accidents per year and it can potentially tell us if the number of accidents is on the rise for each group.
+
+```{r, fig.height=7}
+# Only consider all ages & remove Sex column. Will also remove 'All.road.users' & 'Other' from RTU column
+ROA16.NoAges <- (ROA16.data[ROA16.data$Age.Group == 'All ages' & 
+                              !(ROA16.data$Road.User.Type %in% c('All.Users',"Other")),])[c(-2,-3)] # remove Age & Sex columns
+
+# sum total values by Statistic, Year and Road.User.Type
+ROA16.NoAges.Agg <- ROA16.NoAges %>% group_by(Statistic, Year, Road.User.Type) %>% summarise(across(value, sum))
+
+# plot - killed + injuries per road type user
+ggplot(data = ROA16.NoAges.Agg[ROA16.NoAges.Agg$Statistic != 'Killed&Injured',],
+       aes(x = Year, y = value, colour = Road.User.Type, group = Road.User.Type)) +
+  geom_point() + geom_line(key_glyph = "timeseries") +  # add points and lines
+  # add labels to points at start and end of plots
+  geom_text_repel(data = subset(ROA16.NoAges.Agg, Statistic == 'Killed' & (Year == 2005 | Year == 2018)), 
+                  aes(label = value), show.legend=FALSE) +
+  geom_text_repel(data = subset(ROA16.NoAges.Agg, Statistic == 'Injured' & (Year == 2005 | Year == 2018)), 
+                  aes(label = value), show.legend=FALSE) +
+  labs( # edit labels and titles
+    subtitle = "Figure 1: Annual number of Casualties/Injuries per road type user in Ireland, 2005-2018",
+    caption = source, colour = "Road Type User", y = "Total Number") +
+  facet_wrap(~ Statistic, scales = "free", nrow = 2) +  # create plot for Injured and Killed
+  scale_x_discrete(breaks = c(2006,2008,2010,2012,2014,2016,2018)) +  # include a few ticks to avoid overlapping
+  theme_stata() # pre-installed theme
+```
+Key points from the plot:
+
+* Car drivers are highest number of casualties on Irish roads on each year, followed by pedestrians and car passengers
+
+* Casualty numbers have dropped since 2005 for RTU, with a 79% decrease for car passengers being the highest drop
+
+* Motor and pedal cyclists casualty numbers have stayed consistently low since 2010
+
+* Lower casualty numbers can be attributed to wearing visibility gear for cyclists and pedestrians, and stricter drink-driving laws and strong encouragements to drive slower for drivers
+
+* Injury numbers have dropped for most groups since 2005, except for pedestrians and cyclists (500% increase in reported injuries since 2005)
+
+* Injuries from car accidents peaked in 2009, and recorded its lowest numbers in 2013
+
+* The increased awareness for road safety has been successful for some groups, but perhaps a recent increase of commuters on bikes can explain the massive rise in numbers for this group
+
+-----
+
+#### 2. Which RTU is involved in most accidents? Is the most involved road user the same for both male and female?
+
+From the plots in the first section, we can see that car drivers are involved in more accidents on the road than any other road user type. Here we will examine if the numbers are spread evenly across all age groups and for both genders.
+
+```{r}
+# we only need age groups over the age of 17
+ages.remove <- c('All ages','0 - 5 years','6 - 9 years','10 - 14 years', '15 - 17 years', 'Age unknown')
+ROA16.Drivers <- ROA16.data[ROA16.data$Road.User.Type == 'Drivers'&ROA16.data$Statistic != 'Killed&Injured' 
+                                 & !(ROA16.data$Age.Group %in% ages.remove), ]
+                                   
+# sum total values by Statistic, Year and Age.Group
+ROA16.Drivers.Agg <- ROA16.Drivers %>% 
+  group_by(Statistic, Age.Group, Road.User.Type, Sex) %>% summarise(across(value, sum))
+
+# calculate average values per Statistic
+means <- tapply(ROA16.Drivers.Agg$value, ROA16.Drivers.Agg$Statistic, mean)
+
+# add average and '(average - value)' columns to data.frame
+ROA16.Drivers.Agg$avg.Stat <- ifelse(ROA16.Drivers.Agg$Statistic == 'Killed', means['Killed'], means['Injured'])
+ROA16.Drivers.Agg$diff <- ROA16.Drivers.Agg$value - ROA16.Drivers.Agg$avg.Stat
+
+# add column stating age group and sex
+ROA16.Drivers.Agg$Age.Group.Sex <- paste(ROA16.Drivers.Agg$Sex,"-",ROA16.Drivers.Agg$Age.Group)
+
+# plot to show which age group and gender of drivers are involved the most in accidents
+ggplot(ROA16.Drivers.Agg, mapping = aes(x = Age.Group.Sex, y = diff, fill = diff > 0)) +
+  geom_bar(stat = 'identity') +
+  coord_flip() +  # flip barplot
+  facet_wrap(~ Statistic, scales = "free_x") +  # create plot for casualties and injuries
+  labs(   # edit labels and titles
+    subtitle = "Figure 2: Diverging Plot: Total Numbers per Age Group, Sex - Drivers",
+    caption = source, fill = "Above Average:", x = "", y = "Total Number") +
+  theme_economist() # pre-installed theme
+```
+Key points from the plot:
+
+* All above average values for the killed statistic are all male
+
+* The main factor for the number of injuries appears to be age, with 25-34 and 35-44 years old being above average for both genders
+
+* The male groups that are below the average are closer to the mean number of injuries than females
+
+* By combining the results, we can say that males are more dangerous drivers, especially factoring in that the casualty numbers have a higher significance
+
+-----
+
+#### 3. Which RTU has the largest and lowest ratio of casualties to injuries?
+
+To determine which road type user is the most vulnerable, or the most likely to be killed given that there is an accident, we will compare the ratio of casualties to injuries. We will plot the total number of casualties against the number of injuries for each year.
+
+```{r, fig.height=6}
+# pivot table by Year & RTU so we get individual values for Statistic as columns
+ROA16.Statistic <- cast(subset(ROA16.NoAges.Agg, Statistic != 'Killed&Injured' & Road.User.Type != 'All.Cars'),
+                        Year + Road.User.Type ~ Statistic)
+ROA16.Statistic$Percent <- 100*(ROA16.Statistic$Killed/(ROA16.Statistic$Killed + ROA16.Statistic$Injured))
+
+# calculate percent as killed/(killed + injured) and plot use circle size as measurement
+p <-  ggplot(data = ROA16.Statistic, mapping = aes(x = Injured, y = Killed)) +
+  geom_point(mapping = aes(colour = Road.User.Type, size = Percent,
+                           text = paste("RTU: ",Road.User.Type,"\nCasualties: ", round(Percent,2), "%\nYear: ", Year))) +
+  ggtitle(paste("Figure 3: Proportion of Causalties to Injuries per RTU & Year\n", source)) +
+  labs(size = "Percent (%)") + # edit labels 
+  theme_stata() # pre-installed theme
+
+ggplotly(p, tooltip = "text")
+```
+Key points from the plot:
+
+* Passengers seem to be least likely group to be killed in a car crash, while pedestrians and motor cyclists are definitely the most vulnerable in a road accident
+
+* Cyclists and drivers are more likely to be killed in an accident than passengers, but most years the likelihood is quite low
+
+* The highest proportion of deaths to injuries for each road type user came in the years 2005-2007, while the lowest proportions (except cyclists) occurred in 2017 or 2018 - these leads to the argument that Irish roads are getting safer and road accidents are becoming less severe
+
+
+
+
+
+
+## Summary
+
+Part 1
+
